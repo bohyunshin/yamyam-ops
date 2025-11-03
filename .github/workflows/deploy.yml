@@ -32,19 +32,45 @@ jobs:
         
     - name: Create secrets directory on server
       run: |
-        ssh -p 10103 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
-          sudo mkdir -p /etc/yamyam/secrets
-          sudo chown ${{ secrets.SERVER_USER }}:${{ secrets.SERVER_USER }} /etc/yamyam/secrets
-          sudo chmod 700 /etc/yamyam/secrets
-        "
+        ssh -p 10103 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} bash -s "${{ secrets.SERVER_USER }}" "${{ secrets.SUDO_PASSWORD }}" << 'ENDSSH'
+          SERVER_USER="$1"
+          SUDO_PASSWORD="$2"
+          
+          if [ -n "$SUDO_PASSWORD" ]; then
+            echo "$SUDO_PASSWORD" | sudo -S mkdir -p /etc/yamyam/secrets
+            echo "$SUDO_PASSWORD" | sudo -S chown "$SERVER_USER:$SERVER_USER" /etc/yamyam/secrets
+            echo "$SUDO_PASSWORD" | sudo -S chmod 700 /etc/yamyam/secrets
+          else
+            sudo mkdir -p /etc/yamyam/secrets
+            sudo chown "$SERVER_USER:$SERVER_USER" /etc/yamyam/secrets
+            sudo chmod 700 /etc/yamyam/secrets
+          fi
+        ENDSSH
         
     - name: Deploy environment variables
       run: |
+        # 이미지 태그 결정
+        # 1. workflow_dispatch의 입력값이 있으면 사용
+        # 2. push tags (v*) 트리거일 때는 github.ref_name에서 'v' 접두사 제거 (1.0.0 형식)
+        #    docker-build.yml에서 v1.0.0 태그로 빌드하면 v1.0.0과 1.0.0 둘 다 생성되므로 둘 다 사용 가능
+        #    여기서는 1.0.0 형식을 사용
+        # 3. 그 외에는 'latest' 사용
+        if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+        elif [ "${{ github.event_name }}" == "push" ] && [[ "${{ github.ref }}" =~ ^refs/tags/v ]]; then
+          # 태그에서 'v' 접두사 제거하여 1.0.0 형식으로 사용
+          IMAGE_TAG="${GITHUB_REF#refs/tags/v}"
+        else
+          IMAGE_TAG="latest"
+        fi
+        
+        echo "배포할 이미지 태그: $IMAGE_TAG"
+        
         # .env 파일 생성
-        cat > .env.tmp << 'EOF'
+        cat > .env.tmp << EOF
         # Docker Hub 설정
         DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
-        IMAGE_TAG=${{ github.event.inputs.image_tag || 'latest' }}
+        IMAGE_TAG=$IMAGE_TAG
         
         # 데이터베이스 설정
         POSTGRES_USER=${{ secrets.POSTGRES_USER }}
@@ -75,9 +101,15 @@ jobs:
         rm .env.tmp
         
         # 파일 권한 설정
-        ssh -p 10103 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
-          sudo chmod 600 /etc/yamyam/secrets/.env
-        "
+        ssh -p 10103 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} bash -s "${{ secrets.SUDO_PASSWORD }}" << 'ENDSSH'
+          SUDO_PASSWORD="$1"
+          
+          if [ -n "$SUDO_PASSWORD" ]; then
+            echo "$SUDO_PASSWORD" | sudo -S chmod 600 /etc/yamyam/secrets/.env
+          else
+            sudo chmod 600 /etc/yamyam/secrets/.env
+          fi
+        ENDSSH
         
         
     - name: Deploy application
