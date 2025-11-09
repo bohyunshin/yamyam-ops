@@ -3,10 +3,10 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from app.schemas.vector_db import (
-    IndexCreateRequest,
-    IndexCreateResponse,
-    SimilarUsersRequest,
-    SimilarUsersResponse,
+    StoreVectorsRequest,
+    StoreVectorsResponse,
+    SimilarRequest,
+    SimilarResponse,
 )
 from app.services.vector_db_service import VectorDBService
 
@@ -17,20 +17,25 @@ vector_db_service = VectorDBService()
 
 
 @router.post(
-    "/create",
-    response_model=IndexCreateResponse,
-    summary="FAISS 벡터 인덱스 생성",
+    "/store",
+    response_model=StoreVectorsResponse,
+    summary="FAISS 벡터 저장",
 )
-def create_index(request: IndexCreateRequest) -> IndexCreateResponse:
+def store_vectors(request: StoreVectorsRequest) -> StoreVectorsResponse:
     """
-    사용자 벡터 데이터를 받아서 FAISS 인덱스를 생성합니다.
-    UserCF에서 계산된 임베딩 벡터를 인덱싱할 수 있습니다.
+    기존 FAISS 인덱스에 새로운 사용자 벡터 데이터를 추가합니다.
+    인덱스가 존재하지 않으면 새로 생성합니다.
     """
     try:
-        response = vector_db_service.build_index(request)
+        response = vector_db_service.store_vectors(
+            vector_type=request.vector_type,
+            vectors=request.vectors,
+            normalize=request.normalize,
+        )
         logger.info(
-            "Created FAISS index with %s users and vector dimension %s",
-            response.num_users,
+            "Updated FAISS index for %s. Total ids: %s, vector dimension: %s",
+            request.vector_type.value,
+            response.num_vectors,
             response.vector_dimension,
         )
         return response
@@ -38,17 +43,19 @@ def create_index(request: IndexCreateRequest) -> IndexCreateResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post(
-    "/similar", response_model=SimilarUsersResponse, summary="유사 사용자 검색"
-)
-def get_similar_users(payload: SimilarUsersRequest) -> SimilarUsersResponse:
+@router.post("/similar", response_model=SimilarResponse, summary="내적 기반 검색")
+def get_similar(payload: SimilarRequest) -> SimilarResponse:
     """
-    입력받은 사용자 ID와 식당별 점수 벡터를 기반으로 FAISS 인덱스에서 유사한 사용자들을 검색합니다.
+    입력받은 ID와 점수 벡터를 기반으로 FAISS 인덱스에서 내적 기반 유사 벡터 검색합니다.
     점수 벡터의 차원이 인덱스 차원과 일치하지 않으면 400을 반환합니다.
     """
     try:
-        return vector_db_service.get_similar_users(
-            payload.user_id, payload.diner_scores, payload.top_k
+        return vector_db_service.get_similar(
+            payload.vector_type,
+            payload.query_id,
+            payload.query_vector,
+            payload.top_k,
+            payload.filtering_ids,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

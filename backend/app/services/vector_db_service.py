@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List
 
 import faiss
 import numpy as np
 
 from app.schemas.vector_db import (
-    IndexCreateRequest,
-    IndexCreateResponse,
-    SimilarUsersResponse,
+    Vector,
+    VectorType,
+    StoreVectorsResponse,
+    SimilarResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class _IndexArtifacts:
     index: faiss.IndexFlatIP
-    user_ids: List[str]
+    ids: List[str]
     embeddings: np.ndarray
 
 
@@ -27,66 +28,18 @@ class VectorDBService:
     """FAISS 벡터 데이터베이스 서비스"""
 
     def __init__(self) -> None:
-        self._artifacts: _IndexArtifacts | None = None
+        self._artifacts: Dict[VectorType, _IndexArtifacts] = {}
 
-    def build_index(self, request: IndexCreateRequest) -> IndexCreateResponse:
-        """벡터 데이터로부터 FAISS 인덱스 생성"""
-        if not request.vectors:
-            raise ValueError("vectors list cannot be empty")
-
-        # 벡터 차원 검증
-        vector_dim = len(request.vectors[0].embedding)
-        if vector_dim == 0:
-            raise ValueError("embedding vector cannot be empty")
-
-        # 모든 벡터의 차원이 동일한지 확인
-        for vec in request.vectors:
-            if len(vec.embedding) != vector_dim:
-                raise ValueError(
-                    f"All vectors must have the same dimension. "
-                    f"Expected {vector_dim}, but found {len(vec.embedding)}"
-                )
-
-        user_ids = [vec.user_id for vec in request.vectors]
-        embeddings = np.array(
-            [vec.embedding for vec in request.vectors], dtype=np.float32
-        )
-
-        # 정규화
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        # 영벡터 방지
-        zero_norm_mask = norms.squeeze() == 0
-        if np.any(zero_norm_mask):
-            raise ValueError(
-                f"Zero vectors are not allowed. Found zero vectors for users: "
-                f"{[user_ids[i] for i in np.where(zero_norm_mask)[0]]}"
-            )
-
-        embeddings = embeddings / norms
-
-        # FAISS 인덱스 생성 및 추가
-        index = faiss.IndexFlatIP(vector_dim)
-        index.add(embeddings)
-
-        self._artifacts = _IndexArtifacts(
-            index=index,
-            user_ids=user_ids,
-            embeddings=embeddings,
-        )
-
-        logger.info(
-            "Built FAISS index with %s users and vector dimension %s",
-            len(user_ids),
-            vector_dim,
-        )
-
-        return IndexCreateResponse(num_users=len(user_ids), vector_dimension=vector_dim)
-
-    def get_similar_users(
-        self, user_id: str, diner_scores: List[float], top_k: int
-    ) -> SimilarUsersResponse:
-        """입력받은 사용자 ID와 점수 벡터를 기반으로 FAISS 인덱스에서 유사 사용자 검색"""
-        artifacts = self._ensure_index()
+    def get_similar(
+        self,
+        vector_type: VectorType,
+        query_id: str,
+        diner_scores: List[float],
+        top_k: int,
+        filtering_ids: List[str] = None,
+    ) -> SimilarResponse:
+        """입력받은 ID와 점수 벡터를 기반으로 FAISS 인덱스에서 내적 기반 유사 벡터 검색"""
+        artifacts = self._ensure_index(vector_type)
 
         # 입력 점수를 numpy 배열로 변환
         query_scores = np.array(diner_scores, dtype=np.float32)
@@ -105,21 +58,94 @@ class VectorDBService:
         query_vec = (query_scores / norm).reshape(1, -1)
 
         # FAISS 검색
-        search_scores, indices = artifacts.index.search(
-            query_vec, min(top_k + 1, len(artifacts.user_ids))
+        filtering_set = set(filtering_ids) if filtering_ids else set()
+        search_k = min(top_k + 1, len(artifacts.ids))
+        search_scores, indices = artifacts.index.search(query_vec, search_k)
+
+        # top_k개 반환 (필터링 적용)
+        neighbors = []
+        for idx, score in zip(indices[0], search_scores[0]):
+            vec_id = artifacts.ids[idx]
+            if vec_id not in filtering_set:
+                neighbors.append({"id": vec_id, "score": float(score)})
+                if len(neighbors) >= top_k:
+                    break
+
+        return SimilarResponse(query_id=query_id, neighbors=neighbors)
+
+    def store_vectors(
+        self, vector_type: VectorType, vectors: List[Vector], normalize: bool
+    ) -> StoreVectorsResponse:
+        """
+        Add new vectors to existing FAISS index or create if not exists.
+        """
+        if not vectors:
+            raise ValueError("vectors cannot be empty")
+
+        # Extract IDs and embeddings from Vector objects
+        ids = [vec.id for vec in vectors]
+        vectors = np.array([vec.embedding for vec in vectors], dtype=np.float32)
+
+        if vectors.ndim != 2:
+            raise ValueError("Vectors must be 2-dimensional")
+
+        # 정규화
+        if normalize:
+            vectors = self._normalize_embeddings(vectors, ids)
+
+        # If index exists, append; otherwise create new
+        dimension = vectors.shape[1]
+        if vector_type in self._artifacts:
+            artifacts = self._artifacts[vector_type]
+            if dimension != artifacts.index.d:
+                raise ValueError(
+                    f"Vector dimension {dimension} does not match index dimension {artifacts.index.d}"
+                )
+            artifacts.index.add(vectors)
+            artifacts.ids.extend(ids)
+            # Update embeddings by concatenating
+            artifacts.embeddings = np.vstack([artifacts.embeddings, vectors])
+        else:
+            # Create new index if doesn't exist
+            index = faiss.IndexFlatIP(dimension)
+            index.add(vectors)
+            self._artifacts[vector_type] = _IndexArtifacts(
+                index=index,
+                ids=ids,
+                embeddings=vectors,
+            )
+
+        logger.info(
+            "Updated FAISS index for %s. Total ids: %s, vector dimension: %s",
+            vector_type.value,
+            len(self._artifacts[vector_type].ids),
+            dimension,
         )
 
-        # top_k개 반환
-        neighbors = [
-            {"user_id": artifacts.user_ids[idx], "score": float(score)}
-            for idx, score in zip(indices[0], search_scores[0])
-        ][:top_k]
+        return StoreVectorsResponse(
+            num_vectors=len(self._artifacts[vector_type].ids),
+            vector_dimension=dimension,
+        )
 
-        return SimilarUsersResponse(query_user_id=user_id, neighbors=neighbors)
+    def _normalize_embeddings(
+        self, embeddings: np.ndarray, ids: List[str]
+    ) -> np.ndarray:
+        """벡터 정규화 (L2 norm)"""
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
 
-    def _ensure_index(self) -> _IndexArtifacts:
-        if self._artifacts is None:
-            raise RuntimeError(
-                "FAISS index is not initialized. call build_index first."
+        # 영벡터 방지
+        zero_norm_mask = norms.squeeze() == 0
+        if np.any(zero_norm_mask):
+            raise ValueError(
+                f"Zero vectors are not allowed. Found zero vectors for ids: "
+                f"{[ids[i] for i in np.where(zero_norm_mask)[0]]}"
             )
-        return self._artifacts
+
+        return embeddings / norms
+
+    def _ensure_index(self, vector_type: VectorType) -> _IndexArtifacts:
+        if vector_type not in self._artifacts:
+            raise RuntimeError(
+                f"FAISS index for {vector_type.value} is not initialized. call build_index first."
+            )
+        return self._artifacts[vector_type]
