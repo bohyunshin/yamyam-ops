@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, Body, HTTPException, status
 
+from app.core.redis_db import redis_db
 from app.schemas.redis_schemas import (
     RedisCreateRequest,
     RedisDeleteRequest,
@@ -10,9 +11,10 @@ from app.schemas.redis_schemas import (
     RedisResponse,
     RedisUpdateRequest,
 )
-from app.services.redis_service import redis_service
+from app.services.redis_service import RedisService
 
 router = APIRouter()
+redis_service = RedisService(redis_client=None)
 
 
 @router.post(
@@ -236,8 +238,6 @@ async def delete_redis_key(request: RedisDeleteRequest = Body(...)):
 async def redis_health_check():
     """Check Redis connection status"""
     try:
-        from app.core.redis_db import redis_db
-
         is_connected = await redis_db.ping()
 
         if not is_connected:

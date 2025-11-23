@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   backend:
-    build: 
+    build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: yamyam-backend
@@ -13,24 +13,31 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       FAISS_SERVER_URL: ${FAISS_SERVER_URL:-}
-      
+
       # JWT 설정
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
-      
+
       # 환경 설정
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DEBUG: ${DEBUG:-True}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      
+
       # CORS 설정
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["http://localhost:8501", "http://localhost:3000", "http://localhost"]}
-      
+
       # Firebase 설정
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/firebase-key.json}
-      
+
+      # Remote JSON Load 설정
+      REMOTE_JSON_HOST: ${REMOTE_JSON_HOST}
+      REMOTE_JSON_PORT: ${REMOTE_JSON_PORT}
+      REMOTE_JSON_USER: ${REMOTE_JSON_USER}
+      REMOTE_JSON_PASS: ${REMOTE_JSON_PASS}
+      REMOTE_JSON_PATH: ${REMOTE_JSON_PATH}
+
       # 서버 설정
       WORKERS: ${WORKERS:-1}
     depends_on:
@@ -41,7 +48,6 @@ services:
     volumes:
       - ./backend:/app
       - ./backend/firebase-service-account-key.json:/app/firebase-key.json
-      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
