@@ -80,6 +80,10 @@ jobs:
 
         # Redis 설정
         REDIS_URL=redis://redis:6379
+        REMOTE_HOST=${{ secrets.SERVER_HOST }}
+        REMOTE_USER=${{ secrets.SERVER_USER }}
+        REMOTE_PASSWORD=${{ secrets.SUDO_PASSWORD }}
+        REMOTE_JSON_PATH=${{ secrets.REMOTE_JSON_PATH }}
 
         # JWT 설정
         JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
