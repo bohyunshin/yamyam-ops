@@ -10,6 +10,29 @@ class Settings(BaseSettings):
 
     # Redis 설정
     redis_url: str = "redis://redis:6379"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def validate_database_url(cls, v):
+        """빈 문자열이거나 localhost인 경우 Docker 환경에 맞게 수정"""
+        if not v or v.strip() == "":
+            return "postgresql://yamyam:yamyam_pass@postgres:5432/yamyamdb"
+        # localhost를 postgres로 변경 (Docker Compose 환경)
+        if isinstance(v, str) and "localhost" in v and "postgres" not in v:
+            return v.replace("localhost", "postgres")
+        return v
+
+    @field_validator("redis_url", mode="before")
+    @classmethod
+    def validate_redis_url(cls, v):
+        """빈 문자열이거나 localhost인 경우 Docker 환경에 맞게 수정"""
+        if not v or v.strip() == "":
+            return "redis://redis:6379"
+        # localhost를 redis로 변경 (Docker Compose 환경)
+        if isinstance(v, str) and "localhost" in v and "redis" not in v:
+            return v.replace("localhost", "redis")
+        return v
+
     redis_max_batch_size: int = 1000  # 기본 배치 크기
 
     # FAISS 서버 설정
@@ -21,9 +44,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15  # 15분
     refresh_token_expire_days: int = 7  # 7일
 
-    # Firebase 설정 (파일 경로 또는 JSON 문자열)
-    # GOOGLE_APPLICATION_CREDENTIALS 환경 변수로 파일 경로 지정 (권장)
-    # 또는 FIREBASE_KEY 환경 변수로 JSON 문자열 전달
+    # Firebase 설정
+    # FIREBASE_KEY 환경 변수로 Firebase 서비스 계정 JSON 문자열 전달
     firebase_key: str | None = None
 
     # CORS 설정
@@ -38,6 +60,8 @@ class Settings(BaseSettings):
     debug: bool = True
     log_level: str = "INFO"
 
+    # 데이터베이스 마이그레이션 설정
+    run_migrations: bool = True  # 기본값: True (마이그레이션 실행)
     # config path
     config_root_path: str = "/app/config/beta"
     node2vec_config_path: str = "/app/config/beta/models/graph/node2vec.yaml"

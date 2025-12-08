@@ -12,8 +12,8 @@ services:
       - "8000:8000"
     environment:
       # 데이터베이스 설정
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       FAISS_SERVER_URL: ${FAISS_SERVER_URL:-}
 
       # JWT 설정
@@ -27,11 +27,14 @@ services:
       DEBUG: ${DEBUG:-True}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
+      # Alembic 마이그레이션 설정
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-false}
+
       # CORS 설정
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["http://localhost:8501", "http://localhost:3000", "http://localhost"]}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["http://localhost:8501", "http://localhost:3000", "http://localhost", "http://127.0.0.1:8501"]}
 
       # Firebase 설정
-      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/firebase-key.json}
+      FIREBASE_KEY: ${FIREBASE_KEY:-}
 
       # Remote JSON Load 설정
       REMOTE_JSON_HOST: ${REMOTE_JSON_HOST}
@@ -51,8 +54,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./data:/app/data
       - config_data:/app/config
-      - ./backend/firebase-service-account-key.json:/app/firebase-key.json
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
