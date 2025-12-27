@@ -177,8 +177,9 @@ class KakaoDinerService(
         if user_lat is not None and user_lon is not None:
             fields.insert(
                 0,
-                f"ST_Distance(ST_SetSRID(ST_MakePoint(diner_lon, diner_lat), 4326)::geography, "
-                f"ST_SetSRID(ST_MakePoint({user_lon}, {user_lat}), 4326)::geography) / 1000 AS distance",
+                f"(6371 * acos(cos(radians({user_lat})) * cos(radians(diner_lat)) * "
+                f"cos(radians(diner_lon) - radians({user_lon})) + "
+                f"sin(radians({user_lat})) * sin(radians(diner_lat)))) AS distance",
             )
         else:
             # 거리 정보가 없으면 0으로 설정
@@ -213,8 +214,9 @@ class KakaoDinerService(
         # 지역 필터 (ST_DWithin with geography - 정확한 미터 단위)
         if user_lat is not None and user_lon is not None and radius_km is not None:
             conditions.append(
-                f"ST_DWithin(ST_SetSRID(ST_MakePoint(diner_lon, diner_lat), 4326)::geography, "
-                f"ST_SetSRID(ST_MakePoint({user_lon}, {user_lat}), 4326)::geography, {radius_km * 1000})"
+                f"(6371 * acos(cos(radians({user_lat})) * cos(radians(diner_lat)) * "
+                f"cos(radians(diner_lon) - radians({user_lon})) + "
+                f"sin(radians({user_lat})) * sin(radians(diner_lat)))) <= {radius_km}"
             )
 
         # 2. 쿼리 빌드
@@ -317,8 +319,9 @@ class KakaoDinerService(
         if user_lat is not None and user_lon is not None:
             fields.insert(
                 0,
-                f"ST_Distance(ST_SetSRID(ST_MakePoint(diner_lon, diner_lat), 4326)::geography, "
-                f"ST_SetSRID(ST_MakePoint({user_lon}, {user_lat}), 4326)::geography) / 1000 AS distance_km",
+                f"(6371 * acos(cos(radians({user_lat})) * cos(radians(diner_lat)) * "
+                f"cos(radians(diner_lon) - radians({user_lon})) + "
+                f"sin(radians({user_lat})) * sin(radians(diner_lat)))) AS distance_km",
             )
 
         conditions = []
@@ -457,8 +460,9 @@ class KakaoDinerService(
         if user_lat is not None and user_lon is not None:
             fields.insert(
                 0,
-                f"ST_Distance(ST_SetSRID(ST_MakePoint(diner_lon, diner_lat), 4326)::geography, "
-                f"ST_SetSRID(ST_MakePoint({user_lon}, {user_lat}), 4326)::geography) / 1000 AS distance",
+                f"(6371 * acos(cos(radians({user_lat})) * cos(radians(diner_lat)) * "
+                f"cos(radians(diner_lon) - radians({user_lon})) + "
+                f"sin(radians({user_lat})) * sin(radians(diner_lat)))) AS distance",
             )
 
         conditions = []
@@ -490,8 +494,9 @@ class KakaoDinerService(
         # 지역 필터 (ST_DWithin with geography - 정확한 미터 단위)
         if user_lat is not None and user_lon is not None and radius_km is not None:
             conditions.append(
-                f"ST_DWithin(ST_SetSRID(ST_MakePoint(diner_lon, diner_lat), 4326)::geography, "
-                f"ST_SetSRID(ST_MakePoint({user_lon}, {user_lat}), 4326)::geography, {radius_km * 1000})"
+                f"(6371 * acos(cos(radians({user_lat})) * cos(radians(diner_lat)) * "
+                f"cos(radians(diner_lon) - radians({user_lon})) + "
+                f"sin(radians({user_lat})) * sin(radians(diner_lat)))) <= {radius_km}"
             )
 
         # 2. ORDER BY 구성 (SQL에서 정렬)
@@ -514,13 +519,13 @@ class KakaoDinerService(
             order_by_clause = "diner_review_avg DESC"
 
         elif sort_by == "review_count":
-            # 리뷰수순 (문자열이므로 숫자로 변환하여 정렬)
+            # 리뷰수순 (문자열이므로 숫으로 변환하여 정렬)
             order_by_clause = "CAST(diner_review_cnt AS INTEGER) DESC"
 
         elif sort_by == "distance":
             # 거리순 (거리 계산이 있는 경우만)
             if user_lat is not None and user_lon is not None:
-                order_by_clause = "distance_km ASC"
+                order_by_clause = "distance ASC"
             else:
                 order_by_clause = "diner_review_avg DESC"  # 대체
 
@@ -623,14 +628,14 @@ class KakaoDinerService(
         # 거리 계산 필드
         distance_field = ""
         if user_lat is not None and user_lon is not None:
-            distance_field = f", ST_Distance(ST_SetSRID(ST_MakePoint(diner_lon, diner_lat), 4326)::geography, ST_SetSRID(ST_MakePoint({user_lon}, {user_lat}), 4326)::geography) / 1000 AS distance"
+            distance_field = f", (6371 * acos(cos(radians({user_lat})) * cos(radians(diner_lat)) * cos(radians(diner_lon) - radians({user_lon})) + sin(radians({user_lat})) * sin(radians(diner_lat)))) AS distance"
         else:
             distance_field = ", 0.0 AS distance"
 
         # 거리 필터 조건
         radius_condition = ""
         if user_lat is not None and user_lon is not None and radius_km is not None:
-            radius_condition = f" AND ST_DWithin(ST_SetSRID(ST_MakePoint(diner_lon, diner_lat), 4326)::geography, ST_SetSRID(ST_MakePoint({user_lon}, {user_lat}), 4326)::geography, {radius_km * 1000})"
+            radius_condition = f" AND (6371 * acos(cos(radians({user_lat})) * cos(radians(diner_lat)) * cos(radians(diner_lon) - radians({user_lon})) + sin(radians({user_lat})) * sin(radians(diner_lat)))) <= {radius_km}"
 
         # 1. 정확한 매칭
         exact_query = f"""
